@@ -22,6 +22,17 @@ button:active{background:var(--acc);color:#11111b}
 #preview.on{display:flex}
 #preview .top{padding:6px;background:var(--panel)}
 #preview iframe{flex:1;border:0;background:#fff}
+#dlg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:20;align-items:center;justify-content:center;padding:16px}
+#dlg.on{display:flex}
+#dlg .box{background:var(--panel);border-radius:14px;padding:18px;width:100%;max-width:420px}
+#dlg h3{margin:0 0 10px;font-size:16px}
+#dlg input{width:100%;padding:10px;font-size:16px;border-radius:8px;border:1px solid #45475a;background:var(--bg);color:var(--fg)}
+#dlg label{display:block;font-size:12px;color:var(--mut);margin:10px 0 4px}
+#dlg .f{display:flex;gap:6px;align-items:center}
+#dlg .f input{flex:1;min-width:0}
+#dlg .f button{padding:10px 14px;font-size:16px}
+#dlg .dot{font-size:20px;color:var(--mut)}
+#dlg .row{display:flex;gap:8px;justify-content:flex-end;margin-top:14px}
 #toast{position:fixed;left:50%;bottom:48px;transform:translateX(-50%);background:#313244;color:var(--fg);padding:10px 16px;border-radius:10px;font-size:14px;display:none;z-index:9}
 </style>
 </head>
@@ -32,6 +43,8 @@ button:active{background:var(--acc);color:#11111b}
     <button onclick="openFile()">Open</button>
     <button onclick="save()">Save</button>
     <button onclick="saveAs()">Save As</button>
+    <button onclick="selectAll()">Select All</button>
+    <button onclick="copyText()">Copy</button>
     <button onclick="runPreview()">Run ▶</button>
     <button onclick="zoom(-1)">A−</button>
     <button onclick="zoom(1)">A+</button>
@@ -41,6 +54,17 @@ button:active{background:var(--acc);color:#11111b}
   <div id="status">Ln 1, Col 1</div>
 </div>
 <div id="preview"><div class="top"><button onclick="closePreview()">✕ Close</button></div><iframe id="frame" sandbox="allow-scripts allow-forms allow-modals"></iframe></div>
+<div id="dlg"><div class="box"><h3>Save as</h3>
+  <label>File name</label>
+  <div class="f"><input id="dname" autocapitalize="off" autocomplete="off" spellcheck="false">
+    <button onpointerdown="event.preventDefault()" onclick="mv('dname',-1)">◀</button>
+    <button onpointerdown="event.preventDefault()" onclick="mv('dname',1)">▶</button></div>
+  <label>Extension</label>
+  <div class="f"><span class="dot">.</span><input id="dext" autocapitalize="off" autocomplete="off" spellcheck="false" placeholder="html">
+    <button onpointerdown="event.preventDefault()" onclick="mv('dext',-1)">◀</button>
+    <button onpointerdown="event.preventDefault()" onclick="mv('dext',1)">▶</button></div>
+  <div class="row"><button onclick="dlgCancel()">Cancel</button><button onclick="dlgOk()">Save</button></div>
+</div></div>
 <div id="toast"></div>
 <input type="file" id="picker" style="display:none">
 
@@ -103,16 +127,60 @@ function save(){
     const r = Android.saveFile(ed.value);
     if (r === 'OK') { dirty = false; setName(); toast('Saved'); }
     else {
-      toast(r === 'NOURI' ? 'Choose where to save' : 'Cannot write to original file — choose a location');
-      Android.saveAs(fileName, ed.value);
+      if (r !== 'NOURI') toast('Cannot write to original file — save a copy');
+      saveAs();
     }
-  } else download();
+  } else saveAs();
 }
-function saveAs(){ if (window.Android) Android.saveAs(fileName, ed.value); else download(); }
-function download(){
+function saveAs(){
+  askName(fileName, name => {
+    if (window.Android) Android.saveAs(name, ed.value);
+    else download(name);
+  });
+}
+function download(name){
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([ed.value], {type: 'text/plain'}));
-  a.download = fileName; a.click(); dirty = false; setName();
+  a.download = name; a.click(); fileName = name; dirty = false; setName();
+}
+
+/* ---- Name dialog ---- */
+let dlgCb = null;
+function mv(id, d){
+  const el = $(id); el.focus();
+  const p = Math.max(0, Math.min(el.value.length, (el.selectionStart || 0) + d));
+  el.setSelectionRange(p, p);
+}
+function askName(def, cb){
+  dlgCb = cb;
+  const d = def.lastIndexOf('.');
+  $('dname').value = d > 0 ? def.slice(0, d) : def;
+  $('dext').value = d > 0 ? def.slice(d + 1) : '';
+  $('dlg').classList.add('on');
+  setTimeout(() => { const i = $('dname'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }, 50);
+}
+function dlgCancel(){ $('dlg').classList.remove('on'); dlgCb = null; }
+function dlgOk(){
+  const clean = v => v.trim().replace(/[\\/:*?"<>|]/g, '_');
+  const base = clean($('dname').value);
+  const ext = clean($('dext').value).replace(/^\.+/, '');
+  if (!base) { toast('Enter a file name'); return; }
+  const n = ext ? base + '.' + ext : base;
+  const cb = dlgCb; dlgCancel(); if (cb) cb(n);
+}
+['dname','dext'].forEach(id => $(id).addEventListener('keydown', e => { if (e.key === 'Enter') dlgOk(); }));
+
+/* ---- Select all / copy ---- */
+function selectAll(){ ed.focus(); ed.select(); pos(); }
+function copyText(){
+  ed.focus();
+  let a = ed.selectionStart, b = ed.selectionEnd;
+  if (a === b) { ed.select(); a = 0; b = ed.value.length; }
+  const text = ed.value.substring(a, b);
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch (e) {}
+  if (!ok && navigator.clipboard) { navigator.clipboard.writeText(text).then(() => toast('Copied'), () => toast('Copy failed')); return; }
+  toast(ok ? (a === 0 && b === ed.value.length ? 'Copied all' : 'Copied selection') : 'Copy failed');
 }
 
 function runPreview(){ $('frame').srcdoc = ed.value; $('preview').classList.add('on'); }
