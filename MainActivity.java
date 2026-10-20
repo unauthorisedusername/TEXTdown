@@ -2,6 +2,9 @@ package com.codeeditor.app;
 
 import android.annotation.SuppressLint;
 import android.app.Activity;
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.content.Context;
 import android.content.Intent;
 import android.database.Cursor;
 import android.net.Uri;
@@ -159,6 +162,30 @@ public class MainActivity extends Activity {
     // ---------- Bridge used by index.html (window.Android) ----------
 
     private class Bridge {
+
+        /** Put text on the system clipboard. */
+        @JavascriptInterface
+        public void setClipboard(final String text) {
+            runOnUiThread(() -> {
+                ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+                if (cm != null) cm.setPrimaryClip(ClipData.newPlainText("CODEdown", text == null ? "" : text));
+            });
+        }
+
+        /** Read text from the system clipboard ("" if empty). */
+        @JavascriptInterface
+        public String getClipboard() {
+            try {
+                ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+                if (cm == null || !cm.hasPrimaryClip()) return "";
+                ClipData d = cm.getPrimaryClip();
+                if (d == null || d.getItemCount() == 0) return "";
+                CharSequence t = d.getItemAt(0).coerceToText(MainActivity.this);
+                return t == null ? "" : t.toString();
+            } catch (Exception e) {
+                return "";
+            }
+        }
 
         /** Open the system file picker. */
         @JavascriptInterface
