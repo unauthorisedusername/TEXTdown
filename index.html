@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<title>Code Editor</title>
+<style>
+:root{--bg:#1e1e2e;--panel:#181825;--fg:#cdd6f4;--mut:#7f849c;--acc:#89b4fa;--fs:14px}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,sans-serif}
+#app{display:flex;flex-direction:column;height:100%}
+#bar{display:flex;gap:6px;padding:6px;background:var(--panel);overflow-x:auto;align-items:center;flex:none}
+button{background:#313244;color:var(--fg);border:0;border-radius:8px;padding:8px 12px;font-size:14px;white-space:nowrap}
+button:active{background:var(--acc);color:#11111b}
+#name{margin-left:auto;color:var(--mut);font-size:13px;white-space:nowrap;padding:0 6px}
+#wrap{flex:1;display:flex;min-height:0}
+#gutter,#ed{font:var(--fs)/1.5 ui-monospace,Menlo,Consolas,monospace}
+#gutter{width:52px;overflow:hidden;background:var(--panel);color:var(--mut);text-align:right;padding:8px 6px;white-space:pre;user-select:none;flex:none}
+#ed{flex:1;border:0;outline:0;resize:none;background:var(--bg);color:var(--fg);padding:8px;white-space:pre;overflow:auto;tab-size:2}
+#status{flex:none;padding:4px 10px;font-size:12px;color:var(--mut);background:var(--panel)}
+#preview{display:none;position:fixed;inset:0;background:#fff;flex-direction:column;z-index:5}
+#preview.on{display:flex}
+#preview .top{padding:6px;background:var(--panel)}
+#preview iframe{flex:1;border:0;background:#fff}
+#toast{position:fixed;left:50%;bottom:48px;transform:translateX(-50%);background:#313244;color:var(--fg);padding:10px 16px;border-radius:10px;font-size:14px;display:none;z-index:9}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="bar">
+    <button onclick="newFile()">New</button>
+    <button onclick="openFile()">Open</button>
+    <button onclick="save()">Save</button>
+    <button onclick="saveAs()">Save As</button>
+    <button onclick="runPreview()">Run ▶</button>
+    <button onclick="zoom(-1)">A−</button>
+    <button onclick="zoom(1)">A+</button>
+    <span id="name"></span>
+  </div>
+  <div id="wrap"><div id="gutter"></div><textarea id="ed" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off" wrap="off"></textarea></div>
+  <div id="status">Ln 1, Col 1</div>
+</div>
+<div id="preview"><div class="top"><button onclick="closePreview()">✕ Close</button></div><iframe id="frame" sandbox="allow-scripts allow-forms allow-modals"></iframe></div>
+<div id="toast"></div>
+<input type="file" id="picker" style="display:none">
+
+<script>
+const $ = id => document.getElementById(id);
+const ed = $('ed'), gut = $('gutter');
+let fileName = 'untitled.html', dirty = false, fs = 14;
+
+function setName(){ $('name').textContent = fileName + (dirty ? ' •' : ''); }
+function lines(){
+  const n = ed.value.split('\n').length; let s = '';
+  for (let i = 1; i <= n; i++) s += i + '\n';
+  gut.textContent = s; gut.scrollTop = ed.scrollTop;
+}
+function pos(){
+  const b = ed.value.slice(0, ed.selectionStart).split('\n');
+  $('status').textContent = 'Ln ' + b.length + ', Col ' + (b[b.length-1].length + 1);
+}
+function toast(m){
+  const t = $('toast'); t.textContent = m; t.style.display = 'block';
+  clearTimeout(toast.t); toast.t = setTimeout(() => t.style.display = 'none', 2200);
+}
+function load(name, text){
+  fileName = name; ed.value = text; dirty = false;
+  setName(); lines(); pos(); ed.scrollTop = 0;
+}
+
+ed.addEventListener('input', () => { dirty = true; setName(); lines(); pos(); });
+ed.addEventListener('scroll', () => { gut.scrollTop = ed.scrollTop; });
+['keyup','click','focus'].forEach(e => ed.addEventListener(e, pos));
+ed.addEventListener('keydown', e => {
+  if (e.key === 'Tab') {
+    e.preventDefault();
+    ed.setRangeText('  ', ed.selectionStart, ed.selectionEnd, 'end');
+    ed.dispatchEvent(new Event('input'));
+  } else if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); save(); }
+});
+
+function zoom(d){
+  fs = Math.min(28, Math.max(10, fs + d));
+  document.documentElement.style.setProperty('--fs', fs + 'px');
+}
+function newFile(){
+  if (dirty && !confirm('Discard unsaved changes?')) return;
+  load('untitled.html', '');
+}
+function openFile(){
+  if (dirty && !confirm('Discard unsaved changes?')) return;
+  if (window.Android) Android.pickFile(); else $('picker').click();
+}
+$('picker').addEventListener('change', e => {
+  const f = e.target.files[0]; if (!f) return;
+  const r = new FileReader();
+  r.onload = () => load(f.name, r.result);
+  r.readAsText(f); e.target.value = '';
+});
+
+function save(){
+  if (window.Android) {
+    const r = Android.saveFile(ed.value);
+    if (r === 'OK') { dirty = false; setName(); toast('Saved'); }
+    else {
+      toast(r === 'NOURI' ? 'Choose where to save' : 'Cannot write to original file — choose a location');
+      Android.saveAs(fileName, ed.value);
+    }
+  } else download();
+}
+function saveAs(){ if (window.Android) Android.saveAs(fileName, ed.value); else download(); }
+function download(){
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([ed.value], {type: 'text/plain'}));
+  a.download = fileName; a.click(); dirty = false; setName();
+}
+
+function runPreview(){ $('frame').srcdoc = ed.value; $('preview').classList.add('on'); }
+function closePreview(){ $('preview').classList.remove('on'); $('frame').srcdoc = ''; }
+
+/* ---- Called by the Android app ---- */
+window.openFileInEditor = (name, text) => load(name, text);
+window.onSaveResult = (ok, name, msg) => {
+  if (ok) { if (name) fileName = name; dirty = false; setName(); toast('Saved'); }
+  else toast(msg || 'Save failed');
+};
+
+load(fileName, '<!DOCTYPE html>\n<html>\n<head>\n  <title>Hello</title>\n</head>\n<body>\n  <h1>Hello, world!</h1>\n</body>\n</html>\n');
+dirty = false; setName();
+</script>
+</body>
+</html>
